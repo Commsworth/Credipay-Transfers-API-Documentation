@@ -244,3 +244,104 @@ When a transfer is funded, Credipay **POSTs** a JSON payload to your webhook URL
 ## Changelog
 - v1.0 — Transfer-only quickstart (initiate, complete, simulate-fund-transfer)
 
+
+
+---
+
+## 4) Query Collection Transactions
+
+After initiating and completing transfers, you can **list transactions** across your collections for auditing or reporting.
+
+**Endpoint**  
+```
+GET {{baseUrl}}/api/v1/Gateway/get-collection-transactions
+```
+
+**Headers**
+```
+x-api-key: YOUR_SECRET_KEY
+```
+
+**Query Params**
+- `StartDate` *(string)* — filter transactions from this date.
+- `EndDate` *(string)* — filter transactions up to this date.
+- `Search` *(string)* — search term (e.g., reference, name).
+- `PaymentChannel` *(enum)* — filter by `transfer`, `card`, etc.
+- `PageNumber` *(int)* — pagination control.
+
+**Example cURL**
+```bash
+curl -X GET "{{baseUrl}}/api/v1/Gateway/get-collection-transactions?StartDate=2025-09-01&EndDate=2025-09-07&PaymentChannel=transfer&PageNumber=1"   -H "x-api-key: YOUR_SECRET_KEY"
+```
+
+**Success Response (abridged)**
+```json
+{
+  "isSuccess": true,
+  "value": {
+    "collections": [
+      {
+        "id": "77a2...",
+        "sourceAccountName": "John Doe",
+        "sourceBankName": "Credipay Test Bank",
+        "channel": "transfer",
+        "amount": 10000,
+        "transactionReference": "TRX_12345",
+        "transactionDate": "2025-09-01T10:30:00Z",
+        "status": "Successful"
+      }
+    ],
+    "pageInfo": {
+      "curentPage": 1,
+      "lastPage": 1,
+      "dataCount": 1
+    }
+  }
+}
+```
+
+---
+
+## 5) Get Transaction by ID
+
+Fetch detailed information for a specific collection transaction.
+
+**Endpoint**  
+```
+GET {{baseUrl}}/api/v1/Gateway/get-collection-id
+```
+
+**Headers**
+```
+x-api-key: YOUR_SECRET_KEY
+```
+
+**Query Params**
+- `Id` *(UUID, required)* — transaction identifier.
+
+**Example cURL**
+```bash
+curl -X GET "{{baseUrl}}/api/v1/Gateway/get-collection-id?Id=77a2..."   -H "x-api-key: YOUR_SECRET_KEY"
+```
+
+**Success Response (abridged)**
+```json
+{
+  "status": true,
+  "data": {
+    "transaction": {
+      "id": "77a2...",
+      "sourceAccountNumber": "1234567890",
+      "sourceAccountName": "John Doe",
+      "sourceBankName": "Credipay Test Bank",
+      "channel": "transfer",
+      "amount": 10000,
+      "trasactionReference": "TRX_12345",
+      "transactionDate": "2025-09-01T10:30:00Z"
+    }
+  }
+}
+```
+
+> Use this endpoint when you need **complete breakdown** of one transaction, including **splits** if configured.
+
