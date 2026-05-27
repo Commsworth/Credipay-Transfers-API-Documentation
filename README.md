@@ -26,24 +26,35 @@ POST /api/v1/Gateway/initiate-payment
   "email": "customer@email.com",
   "firstName": "John",
   "lastName": "Doe",
-  "phoneNumber": "08012345678",
-  "currencyType": "NGN"
+  "phone": "08012345678",
+  "currencyCode": "NGN",
+  "paymentRoute": "direct"
 }
 ```
 
 **Response (Success):**
 ```json
 {
-  "isSuccess": true,
-  "message": "Transaction initiated",
-  "data": {
-    "accountNumber": "1234567890",
-    "accountName": "Business Name",
-    "bankName": "9jaPay MFB",
-    "bankCode": "090629",
+  "value": {
+    "amount": 5000.0,
+    "charges": 0.0,
     "paymentReference": "unique-ref-123",
-    "expiresAt": "2024-01-01T00:30:00Z"
-  }
+    "transactionReference": "270520263AE8",
+    "currencyCode": "NGN",
+    "accountInfo": {
+      "accountName": "Business Name",
+      "accountNumber": "9000027534",
+      "bankName": "9japay MFB"
+    },
+    "cardInfo": {
+      "authorizationType": null
+    },
+    "ussdInfo": null
+  },
+  "isSuccess": true,
+  "error": "",
+  "message": "Payment intitated successfully",
+  "responseCode": "00"
 }
 ```
 
@@ -71,9 +82,13 @@ POST /api/v1/Gateway/simulate-fund-transfer
 
 ---
 
-### 3. Complete Payment (Trigger Webhook)
+### 3. Webhook Fires Automatically
 
-After the fund transfer is received (simulated or real), call `complete-payment` to finalize and trigger the collection success webhook to your webhook URL.
+Once the transfer is received by the system (via 9jaPay notification), a `Collection.CollectionSuccess` webhook is **automatically sent** to your configured webhook URL. You do NOT need to call `complete-payment` to receive the webhook.
+
+### 4. Complete Payment (Confirmation/Re-trigger)
+
+You can call `complete-payment` to confirm the payment was received and optionally re-trigger the webhook. This also serves as a synchronous check.
 
 ```
 POST /api/v1/Gateway/complete-payment
@@ -111,34 +126,41 @@ This means the fund transfer has not been received yet. Retry after ensuring the
 
 ## Webhook Payload: Collection Success
 
-When `complete-payment` succeeds, a webhook is sent to your configured webhook URL with the following payload:
+The webhook is sent **automatically** when the fund transfer is received by the system. It is also re-sent when `complete-payment` is called successfully.
 
 **Event Type:** `Collection.CollectionSuccess`
 
-**Payload Structure:**
+**Full Payload Structure (with envelope):**
 ```json
 {
-  "event": "Collection.CollectionSuccess",
+  "id": "6c4b408c-332e-4f7a-a7d4-0fa1976370d1",
+  "eventType": "Collection.CollectionSuccess",
+  "eventTimestamp": "2026-05-20T14:34:44.0817036Z",
+  "version": "1.0",
+  "eventMessage": "Collection completed.",
   "data": {
     "amount": 5000.00,
     "charge": 50.00,
     "paymentReference": "unique-ref-123",
     "transactionReference": "unique-ref-123",
-    "paymentChannel": "transfer",
+    "paymentChannel": 0,
     "currencyCode": "NGN",
-    "paymentRoute": "direct",
+    "paymentRoute": 0,
     "linkId": null,
-    "transactionType": "Credit",
+    "transactionType": 1,
     "accountInfo": {
       "accountName": "Business Name",
-      "accountNumber": "1234567890",
-      "bankName": "9jaPay MFB"
+      "accountNumber": "9000027534",
+      "bankName": "9japay MFB",
+      "bankCode": "090629"
     },
     "payerInfo": {
       "firstName": "John",
       "lastName": "Doe",
       "email": "customer@email.com",
-      "phone": "08012345678"
+      "phone": "08012345678",
+      "parentId": null,
+      "customerGroup": null
     },
     "successPayerInfo": {
       "sourceAccountNumber": "NA",
@@ -149,22 +171,47 @@ When `complete-payment` succeeds, a webhook is sent to your configured webhook U
 }
 ```
 
+> **Note on enum values:** `paymentChannel`, `paymentRoute`, and `transactionType` are serialized as **integers** in the webhook (not strings). See mapping table below.
+
+### Enum Mappings
+
+| Field | Value | Meaning |
+|-------|-------|---------|
+| `paymentChannel` | `0` | transfer |
+| `paymentChannel` | `1` | card |
+| `paymentChannel` | `2` | ussd |
+| `paymentRoute` | `0` | direct |
+| `paymentRoute` | `1` | pop_up |
+| `paymentRoute` | `2` | link |
+| `transactionType` | `0` | Debit |
+| `transactionType` | `1` | Credit |
+
 ### Webhook Field Descriptions
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `amount` | decimal | The transaction amount |
-| `charge` | decimal | Fee charged on the transaction |
-| `paymentReference` | string | Your unique reference (same as sent in initiate-payment) |
-| `transactionReference` | string | System transaction reference (equals `paymentReference` for transfers) |
-| `paymentChannel` | string | `transfer`, `card`, `ussd`, `qrcode`, `account` |
-| `currencyCode` | string | Currency code (e.g., `NGN`) |
-| `paymentRoute` | string | `direct`, `pop_up`, `link` |
-| `linkId` | guid/null | Payment link ID (if initiated via payment link) |
-| `transactionType` | string | Always `Credit` for collections |
-| `accountInfo` | object | The virtual account that received the transfer |
-| `payerInfo` | object | Payer details provided during initiation |
-| `successPayerInfo` | object | Source bank details of the actual sender (may be "NA" in test) |
+| `id` | guid | Unique webhook event ID (use for idempotency) |
+| `eventType` | string | Event type identifier |
+| `eventTimestamp` | datetime | UTC timestamp of the event |
+| `version` | string | Webhook payload version |
+| `eventMessage` | string | Human-readable event description |
+| `data.amount` | decimal | The transaction amount |
+| `data.charge` | decimal | Fee charged on the transaction |
+| `data.paymentReference` | string/null | Your unique reference (same as sent in initiate-payment) |
+| `data.transactionReference` | string | System transaction reference (equals `paymentReference` for Gateway transfers) |
+| `data.paymentChannel` | int | `0`=transfer, `1`=card, `2`=ussd |
+| `data.currencyCode` | string | Currency code (e.g., `NGN`) |
+| `data.paymentRoute` | int | `0`=direct, `1`=pop_up, `2`=link |
+| `data.linkId` | guid/null | Payment link ID (if initiated via payment link) |
+| `data.transactionType` | int | `1`=Credit (always Credit for collections) |
+| `data.accountInfo` | object | The virtual account that received the transfer |
+| `data.accountInfo.bankCode` | string | Bank code (e.g., `090629`) |
+| `data.payerInfo` | object | Payer details provided during initiation |
+| `data.payerInfo.parentId` | guid/null | Parent customer ID (ERP integrations) |
+| `data.payerInfo.customerGroup` | int/null | Customer group enum (ERP integrations) |
+| `data.successPayerInfo` | object | Source bank details of the actual sender (may be "NA" in test) |
+
+**Webhook Security:** The webhook includes an `X-Hash` header containing an HMAC-SHA256 signature of the payload body, signed with your secret key. Use this to verify webhook authenticity.
 
 ---
 
@@ -258,11 +305,44 @@ The webhook payload does **not** include the collection database `Id` (GUID) dir
 
 ---
 
+## Verify Payment Status (Transfer)
+
+You can poll payment status instead of (or in addition to) waiting for the webhook:
+
+```
+POST /api/v1/Gateway/verify-payment-status
+```
+
+**Request Body:**
+```json
+{
+  "reference": "unique-ref-123",
+  "paymentChannel": "transfer"
+}
+```
+
+**Response:**
+```json
+{
+  "value": {
+    "reference": "unique-ref-123",
+    "status": "Successful"
+  },
+  "isSuccess": true,
+  "error": "",
+  "message": "Payment completed successfully.",
+  "responseCode": "00"
+}
+```
+
+**Possible status values:** `InProgress`, `Successful`, `Unknown`
+
+---
+
 ## Known Limitations
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| `verify-payment-status` not implemented for transfers | Known | Only works for card payments currently. Use `get-collection-transactions?Search=` instead. |
 | `successPayerInfo` shows "NA" in test | By design | Real sender bank details only available in live with supported bank providers |
 
 ---
@@ -281,11 +361,13 @@ curl -X POST "{baseUrl}/api/v1/Gateway/initiate-payment" \
     "email": "test@email.com",
     "firstName": "Test",
     "lastName": "User",
-    "phoneNumber": "08012345678",
-    "currencyType": "NGN"
+    "phone": "08012345678",
+    "currencyCode": "NGN",
+    "paymentRoute": "direct"
   }'
 
 # 2. Simulate fund transfer (test only)
+# Use the accountNumber from step 1 response: value.accountInfo.accountNumber
 curl -X POST "{baseUrl}/api/v1/Gateway/simulate-fund-transfer" \
   -H "x-api-key: {your_api_key}" \
   -H "Content-Type: application/json" \
@@ -294,7 +376,16 @@ curl -X POST "{baseUrl}/api/v1/Gateway/simulate-fund-transfer" \
     "amount": 5000
   }'
 
-# 3. Complete payment (triggers webhook)
+# 3. Verify payment status (poll until Successful)
+curl -X POST "{baseUrl}/api/v1/Gateway/verify-payment-status" \
+  -H "x-api-key: {your_api_key}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reference": "test-ref-001",
+    "paymentChannel": "transfer"
+  }'
+
+# 4. Complete payment (confirmation/re-trigger webhook)
 curl -X POST "{baseUrl}/api/v1/Gateway/complete-payment" \
   -H "x-api-key: {your_api_key}" \
   -H "Content-Type: application/json" \
@@ -303,7 +394,7 @@ curl -X POST "{baseUrl}/api/v1/Gateway/complete-payment" \
     "paymentChannel": "transfer"
   }'
 
-# 4. Query collection by reference
+# 5. Query collection by reference
 curl -X GET "{baseUrl}/api/v1/Gateway/get-collection-transactions?Search=test-ref-001" \
   -H "x-api-key: {your_api_key}"
 ```
