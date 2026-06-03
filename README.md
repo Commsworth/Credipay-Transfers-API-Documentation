@@ -28,9 +28,23 @@ POST /api/v1/Gateway/initiate-payment
   "lastName": "Doe",
   "phone": "08012345678",
   "currencyCode": "NGN",
-  "paymentRoute": "direct"
+  "paymentRoute": "direct",
+  "expiresIn": 900
 }
 ```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `amount` | decimal | Yes | Amount in Naira |
+| `paymentReference` | string | Yes | Your unique idempotency reference |
+| `paymentChannel` | string | Yes | `"transfer"` |
+| `email` | string | Yes | Customer email |
+| `firstName` | string | No | Customer first name |
+| `lastName` | string | No | Customer last name |
+| `phone` | string | No | Customer phone |
+| `currencyCode` | string | No | Default: `"NGN"` |
+| `paymentRoute` | string | No | `"direct"`, `"pop_up"`, or `"link"` |
+| `expiresIn` | int | No | Transient account TTL in seconds. Default: **900** (15 min). Min: 300 (5 min), Max: 3600 (1 hr). |
 
 **Response (Success):**
 ```json
@@ -60,6 +74,8 @@ POST /api/v1/Gateway/initiate-payment
 
 The response provides a **transient virtual account** for the customer to transfer into. Display these details to the payer.
 
+> **Important:** The virtual account expires after the `expiresIn` duration (default 15 minutes). The customer must transfer the **exact amount in one go** before the account expires. Partial payments are rejected — only a transfer where the amount is equal to or greater than the requested amount will complete the collection.
+
 ---
 
 ### 2. Customer Makes Transfer
@@ -74,9 +90,11 @@ POST /api/v1/Gateway/simulate-fund-transfer
 ```json
 {
   "recipientAccountNumber": "1234567890",
-  "amount": 5000
+  "amount": 500000
 }
 ```
+
+> **⚠️ IMPORTANT (Dev/Test only):** The `amount` field in `simulate-fund-transfer` is in **kobo** (1 Naira = 100 kobo). To simulate a 5000 NGN payment, pass `500000`. This differs from `initiate-payment` where `amount` is in Naira.
 
 > **Note:** This endpoint only works in non-production environments.
 
@@ -344,6 +362,10 @@ POST /api/v1/Gateway/verify-payment-status
 | Issue | Status | Notes |
 |-------|--------|-------|
 | `successPayerInfo` shows "NA" in test | By design | Real sender bank details only available in live with supported bank providers |
+| Transient account expires after TTL | By design | Default 15 min (configurable via `expiresIn`). Customer must complete transfer before expiry |
+| Partial payments rejected | By design | Amount transferred must be ≥ requested amount. Underpayments do not create a collection record |
+| `simulate-fund-transfer` amount is in kobo | Test only | Multiply Naira amount by 100 when calling simulate endpoint |
+| Simulate only fires one webhook per account | Test only | 9jaPay sandbox does not deliver multiple webhooks to the same transient account |
 
 ---
 
@@ -368,12 +390,13 @@ curl -X POST "{baseUrl}/api/v1/Gateway/initiate-payment" \
 
 # 2. Simulate fund transfer (test only)
 # Use the accountNumber from step 1 response: value.accountInfo.accountNumber
+# NOTE: amount is in KOBO (multiply Naira by 100)
 curl -X POST "{baseUrl}/api/v1/Gateway/simulate-fund-transfer" \
   -H "x-api-key: {your_api_key}" \
   -H "Content-Type: application/json" \
   -d '{
     "recipientAccountNumber": "{accountNumber_from_step_1}",
-    "amount": 5000
+    "amount": 500000
   }'
 
 # 3. Verify payment status (poll until Successful)
